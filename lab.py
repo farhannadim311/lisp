@@ -190,55 +190,59 @@ def flatten(nested):
         else:
             yield item
 
-def evaluate(tree, frame = None):
-    """
-    Evaluate the given syntax tree according to the rules of the Scheme language.
+def evaluate(tree, frame=None):
+    if frame is None:
+        frame = make_initial_frame()
 
-    Arguments:
-        tree (type varies): a fully parsed expression, as the output from the
-                            parse function
-    """
     # Case 1: Numeric literal
-    if(frame is None):
-        frame = Frames()
-
     if isinstance(tree, (int, float)):
         return tree
 
-    # Case 2: Symbol reference (like '+')
+    if (isinstance(tree, list) and tree[0] == "lambda"):
+        params = tree[1]
+        body = tree[2]
+        func = Function(params, body, frame)
+        return func
+    
+    if (isinstance(tree, list) and tree[0] == "define" and isinstance(tree[1], list)):
+        params = tree[1][1:]
+        body = tree[2]
+        func = Function(params, body, frame)
+        frame.define(tree[1][0], func)
+        return func
+    # Case 2: Symbol
     if isinstance(tree, str):
-        if tree in scheme_builtins:
-            return scheme_builtins[tree]
-        else:
-            raise SchemeNameError()
+        return frame.lookup(tree)
 
-    # Case 3: List (compound expression)
+    # Case 3: Compound expression
     if isinstance(tree, list):
         if len(tree) == 0:
             raise SchemeEvaluationError()
 
-        op = tree[0]
+        if tree[0] == "define":
+            if len(tree) != 3:
+                raise SchemeSyntaxError()
+            name = tree[1]
+            val = evaluate(tree[2], frame)
+            frame.define(name, val)
+            return val
 
-        if(not isinstance(op,str)):
-            raise SchemeEvaluationError()
-
-        # Check operator is valid
-        if op not in scheme_builtins:
+        op = evaluate(tree[0], frame)  # allows operator to be a variable
+        args = [evaluate(arg, frame) for arg in tree[1:]]
+        try:
+            return op(*args)
+        except SchemeNameError:
             raise SchemeNameError()
-
-        # Must have at least one argument (e.g. ['+', 1])
-        if len(tree) == 1:
+        except SchemeEvaluationError:
             raise SchemeEvaluationError()
+        except Exception:
+            SchemeEvaluationError()
 
-        # Recursively evaluate arguments
-        args = [evaluate(arg) for arg in tree[1:]]
-
-        # Apply operator
-        return scheme_builtins[op](*args)
-
-    # If it's none of the above, it's an error
     raise SchemeEvaluationError()
 
+
+def make_initial_frame():
+    return Frames()
 
 class ParentFrame():
     def __init__(self, parent = None):
@@ -249,6 +253,20 @@ class ParentFrame():
             "/": cal_div
         }
         self.parent = parent
+
+    def define(self, name, value):
+        if(not isinstance(name, str) or " " in name):
+            raise SchemeNameError()
+        self.bindings[name] = value
+    
+    def lookup(self, name):
+        if name in self.bindings:
+            return self.bindings[name]
+        else:
+            if(self.parent is not None):
+                return self.parent.lookup(name)
+            raise SchemeNameError()
+            
 
 class Frames():
     
@@ -270,8 +288,31 @@ class Frames():
             if(self.parent is not None):
                 return self.parent.lookup(name)
             raise SchemeNameError()
-            
+
+class Function:
+    def __init__(self, params, body, defining_env):
+        self.params = params          # list of parameter names (strings)
+        self.body = body              # single Scheme expression (parsed tree)
+        self.env = defining_env       # frame where the function was defined (for lexical scoping)
+
+    def __call__(self, *args):
+        if len(args) != len(self.params):
+            raise SchemeEvaluationError()
+
+        # Create a new frame for the function call, enclosing frame is the defining environment
+        frame = Frames(self.env)
         
+        # Bind parameters to arguments in the new frame
+        for param, arg in zip(self.params, args):
+            frame.define(param, arg)
+
+        # Evaluate the function body in the new frame
+        return evaluate(self.body, frame)
+
+
+        
+        
+    
 
 if __name__ == "__main__":
     # code in this block will only be executed if lab.py is the main file being
@@ -279,4 +320,4 @@ if __name__ == "__main__":
     import os
     sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
     import schemerepl
-    schemerepl.SchemeREPL(sys.modules[__name__], use_frames=False, verbose=False).cmdloop()
+    schemerepl.SchemeREPL(sys.modules[__name__], use_frames=True, verbose=False).cmdloop()
