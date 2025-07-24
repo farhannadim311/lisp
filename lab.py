@@ -125,7 +125,26 @@ def parse(tokens):
     Arguments:
         tokens (list): a list of strings representing tokens
     """
-    raise NotImplementedError
+    def parse_expression(index):
+        token = tokens[index]
+
+        # Base case: number or symbol
+        if token not in ("(", ")"):
+            return number_or_symbol(token), index + 1
+
+        # Recursive case: S-expression
+        if token == "(":
+            subexpr = []
+            index += 1  # move past '('
+
+            while tokens[index] != ")":
+                expr, index = parse_expression(index)
+                subexpr.append(expr)
+
+            return subexpr, index + 1  # skip past ')'
+
+    parsed_expr, next_index = parse_expression(0)
+    return parsed_expr
 
 
 ######################
@@ -139,10 +158,23 @@ def calc_sub(*args):
     first_num, *rest_nums = args
     return first_num - scheme_builtins['+'](*rest_nums)
 
+def calc_mul(*args):
+    if(len(args) == 1):
+        return args[0]
+    first_num, *rest_nums = args
+    return first_num * scheme_builtins['*'](*rest_nums)
 
+def cal_div(*args):
+    if(len(args) == 1):
+        return args[0]
+    first_num, *rest_nums = args
+    return first_num / scheme_builtins["*"](*rest_nums)
+ 
 scheme_builtins = {
     "+": lambda *args: sum(args),
     "-": calc_sub,
+    "*": calc_mul,
+    "/": cal_div
 }
 
 
@@ -151,18 +183,95 @@ scheme_builtins = {
 # Evaluation #
 ##############
 
+def flatten(nested):
+    for item in nested:
+        if isinstance(item, list):
+            yield from flatten(item)  # recursively yield items from sublist
+        else:
+            yield item
 
-def evaluate(tree):
+def evaluate(tree, frame = None):
     """
-    Evaluate the given syntax tree according to the rules of the Scheme
-    language.
+    Evaluate the given syntax tree according to the rules of the Scheme language.
 
     Arguments:
         tree (type varies): a fully parsed expression, as the output from the
                             parse function
     """
-    raise NotImplementedError
+    # Case 1: Numeric literal
+    if(frame is None):
+        frame = Frames()
 
+    if isinstance(tree, (int, float)):
+        return tree
+
+    # Case 2: Symbol reference (like '+')
+    if isinstance(tree, str):
+        if tree in scheme_builtins:
+            return scheme_builtins[tree]
+        else:
+            raise SchemeNameError()
+
+    # Case 3: List (compound expression)
+    if isinstance(tree, list):
+        if len(tree) == 0:
+            raise SchemeEvaluationError()
+
+        op = tree[0]
+
+        if(not isinstance(op,str)):
+            raise SchemeEvaluationError()
+
+        # Check operator is valid
+        if op not in scheme_builtins:
+            raise SchemeNameError()
+
+        # Must have at least one argument (e.g. ['+', 1])
+        if len(tree) == 1:
+            raise SchemeEvaluationError()
+
+        # Recursively evaluate arguments
+        args = [evaluate(arg) for arg in tree[1:]]
+
+        # Apply operator
+        return scheme_builtins[op](*args)
+
+    # If it's none of the above, it's an error
+    raise SchemeEvaluationError()
+
+
+class ParentFrame():
+    def __init__(self, parent = None):
+        self.bindings = {
+             "+": lambda *args: sum(args),
+            "-": calc_sub,
+            "*": calc_mul,
+            "/": cal_div
+        }
+        self.parent = parent
+
+class Frames():
+    
+    def __init__(self, parent = None):
+        self.bindings = {}
+        if parent is None:
+            parent = ParentFrame()
+        self.parent = parent
+    
+    def define(self, name, value):
+        if(not isinstance(name, str) or " " in name):
+            raise SchemeNameError()
+        self.bindings[name] = value
+
+    def lookup(self, name):
+        if name in self.bindings:
+            return self.bindings[name]
+        else:
+            if(self.parent is not None):
+                return self.parent.lookup(name)
+            raise SchemeNameError()
+            
+        
 
 if __name__ == "__main__":
     # code in this block will only be executed if lab.py is the main file being
